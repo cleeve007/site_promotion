@@ -1,0 +1,23 @@
+Une page d’accueil qui sépare les deux types d’utilisateurs
+→ “Vous êtes Promoteur”
+→ “Vous êtes Vendeur”
+
+Un process vendeur
+→ page qui demande de se connecter (email/mdp)
+→ page avec les information deja rentrer ou vide , qui propose de les rentres ou modifier, chaque info est rentrer/modifier individuellement. dans la page il y a aussi deux bouton, 1 pour ne plus vendre mais ne pas supprimer les infos, l'autre pour supprimer toutes ces info.
+
+Un process Promoteur
+→ page avec une map de tout les maison a vendre avec info quand on met la souris dessus. avec des filtre au dessus (quartier/prix). un buton export en excel
+
+
+A modifier:
+ce qu'on a :
+- Nom
+- Email
+- Numero de tel
+- Adresse
+- code postal
+- cordonner gps ( geoportail site : https://www.geoportail.gouv.fr/carte, api pour sugestion + cordonner : https://data.geopf.fr/geocodage/completion?indices=portailCompletion&type=StreetAddress%2CPositionOfInterest&maximumResponses=5&text=44%20route%20nationale%20Brun)
+- prix du bien
+- description/comentaire peut etre autre en option (context du bien, si deja en contact avec un promoteur, )
+- 

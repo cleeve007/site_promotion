@@ -1,0 +1,27 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Modifier bien</title>
+</head>
+<body>
+
+    <h1>Informations du bien</h1>
+
+    <form method="post">
+        Adresse :<br>
+        <input type="text" name="adresse" value="{{ bien.adresse if bien else '' }}"><br><br>
+
+        Prix (€) :<br>
+        <input type="number" name="prix" value="{{ bien.prix if bien else '' }}"><br><br>
+
+        Description :<br>
+        <textarea name="description">{{ bien.description if bien else '' }}</textarea><br><br>
+
+        <button type="submit">Enregistrer</button>
+    </form>
+
+    <p><a href="{{ url_for('vendeur_dashboard') }}">Retour</a></p>
+
+</body>
+</html>

@@ -1,0 +1,45 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Vendeur</title>
+</head>
+<body>
+
+    <h1>Bonjour {{ user.nom }}</h1>
+
+    <h2>Votre bien immobilier</h2>
+
+    {% if bien %}
+    <p><strong>Adresse :</strong> {{ bien.adresse or "Non renseigné" }}</p>
+    <p><strong>Prix :</strong> {{ bien.prix or "Non renseigné" }}</p>
+    <p><strong>Description :</strong> {{ bien.description or "Non renseigné" }}</p>
+    <p>
+        <strong>Statut :</strong>
+        {% if bien.actif %}
+        <span style="color:green;">En vente</span>
+        {% else %}
+        <span style="color:red;">Retiré de la vente</span>
+        {% endif %}
+    </p>
+
+    <h3>Actions :</h3>
+    <p>
+        <a href="{{ url_for('update_bien') }}">Modifier les informations</a><br>
+        {% if bien.actif %}
+        <a href="{{ url_for('stop_vendre') }}">Ne plus vendre</a><br>
+        {% else %}
+        <a href="{{ url_for('start_vendre') }}">Remettre en vente</a><br>
+        {% endif %}
+        <a href="{{ url_for('delete_bien') }}" style="color:red;">Supprimer toutes mes données</a>
+    </p>
+
+    {% else %}
+    <p>Vous n’avez pas encore enregistré votre bien.</p>
+    <p><a href="{{ url_for('update_bien') }}">Ajouter mon bien</a></p>
+    {% endif %}
+
+    <p><a href="{{ url_for('vendeur_logout') }}">Se déconnecter</a></p>
+
+</body>
+</html>

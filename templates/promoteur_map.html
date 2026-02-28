@@ -1,0 +1,105 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Carte des biens à vendre</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        #map {
+            height: 90vh;
+            width: 100%;
+        }
+
+        .filters {
+            padding: 10px;
+            background: #f9f9f9;
+            border-bottom: 1px solid #ddd;
+        }
+
+        input, select {
+            padding: 5px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="filters">
+        <form method="get" action="{{ url_for('promoteur_home') }}">
+            Ville :
+            <input type="text" name="ville" value="{{ request.args.get('ville', '') }}">
+
+            Quartier :
+            <input type="text" name="quartier" value="{{ request.args.get('quartier', '') }}">
+
+            Prix min :
+            <input type="number" name="prix_min" value="{{ request.args.get('prix_min', '') }}">
+
+            Prix max :
+            <input type="number" name="prix_max" value="{{ request.args.get('prix_max', '') }}">
+
+            <button type="submit">Filtrer</button>
+
+            <a href="{{ url_for('export_biens') }}">Exporter Excel</a>
+        </form>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <script>
+    // Création de la carte
+    var map = L.map('map').setView([46.5, 2.5], 6); // Centre France
+
+    // Fond de carte OpenStreetMap
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    // Données envoyées depuis Flask
+    var biens = {{ biens|tojson }};
+
+    // Ajouter un marker pour chaque bien
+    biens.forEach(function(bien) {
+
+        var lat = bien.latitude;
+        var lon = bien.longitude;
+
+        if (!lat || !lon) {
+            // fallback si adresse non géocodée
+            return;
+        }
+
+
+        var marker = L.marker([lat, lon]).addTo(map);
+
+        var popup = `
+            <b>${bien.adresse}</b><br>
+            ${bien.ville} ${bien.code_postal}<br>
+            Quartier : ${bien.quartier || "?"}<br>
+            Prix : ${bien.prix || "?"} €<br>
+            Surface : ${bien.surface_habitable || "?"} m²<br>
+            Pièces : ${bien.nombre_pieces || "?"}<br>
+        `;
+
+        marker.bindPopup(popup);
+
+        marker.on("mouseover", function() {
+            this.openPopup();
+        });
+    });
+    </script>
+
+</body>
+</html>
