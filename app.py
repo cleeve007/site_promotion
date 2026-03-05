@@ -59,11 +59,14 @@ def submit_questionnaire():
         "email": request.form.get("email", "").strip(),
         "telephone": request.form.get("telephone", "").strip(),
         "adresse": request.form.get("adresse", "").strip(),
-        "ville": request.form.get("ville", "").strip(),
-        "code_postal": request.form.get("code_postal", "").strip(),
+        "adresse_fulltext": request.form.get("adresse_fulltext", "").strip(),
+        "adresse_x": request.form.get("adresse_x", "").strip(),
+        "adresse_y": request.form.get("adresse_y", "").strip(),
+        "adresse_city": request.form.get("adresse_city", "").strip(),
+        "adresse_zipcode": request.form.get("adresse_zipcode", "").strip(),
+        "adresse_kind": request.form.get("adresse_kind", "").strip(),
+        "adresse_source": request.form.get("adresse_source", "").strip(),
         "prix": request.form.get("prix", "").strip(),
-        "surface_habitable": request.form.get("surface_habitable", "").strip(),
-        "nombre_pieces": request.form.get("nombre_pieces", "").strip(),
         "description": request.form.get("description", "").strip(),
     }
 
@@ -81,16 +84,25 @@ def submit_questionnaire():
             return None
         return int(value)
 
+    def _to_float(value: str):
+        value = value.strip()
+        if value == "":
+            return None
+        return float(value)
+
     submission = PropertySubmission(
         nom=form["nom"],
         email=form["email"],
         telephone=form["telephone"],
         adresse=form["adresse"] or None,
-        ville=form["ville"] or None,
-        code_postal=form["code_postal"] or None,
+        adresse_fulltext=form["adresse_fulltext"] or None,
+        adresse_x=_to_float(form["adresse_x"]),
+        adresse_y=_to_float(form["adresse_y"]),
+        adresse_city=form["adresse_city"] or None,
+        adresse_zipcode=form["adresse_zipcode"] or None,
+        adresse_kind=form["adresse_kind"] or None,
+        adresse_source=form["adresse_source"] or None,
         prix=_to_int(form["prix"]),
-        surface_habitable=_to_int(form["surface_habitable"]),
-        nombre_pieces=_to_int(form["nombre_pieces"]),
         description=form["description"] or None,
     )
 

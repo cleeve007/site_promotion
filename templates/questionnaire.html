@@ -123,6 +123,37 @@
       color: rgba(255,255,255,.95);
     }
 
+    /* Address autocomplete */
+    .addr-box {
+      border: 1px solid var(--line);
+      background: rgba(5, 8, 23, .65);
+      border-radius: 14px;
+      padding: 10px;
+    }
+
+    .addr-status { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+
+    .addr-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .addr-item {
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.08);
+      border-radius: 12px;
+      padding: 10px 10px;
+      cursor: pointer;
+    }
+
+    .addr-item:hover { border-color: rgba(124,92,255,.45); }
+
+    .addr-main { font-weight: 800; font-size: 14px; }
+    .addr-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
     @media (max-width: 780px) {
       .grid { grid-template-columns: 1fr; }
       .actions { flex-direction: column; align-items: stretch; }
@@ -167,28 +198,29 @@
 
           <div class="field full">
             <label for="adresse">Adresse</label>
-            <input id="adresse" name="adresse" type="text" placeholder="Rue, numéro…" value="{{ form.adresse if form else '' }}" />
-            <div class="help">Tu peux laisser vide si tu ne veux pas donner l’adresse exacte pour le moment.</div>
-          </div>
+            <input
+              id="adresse"
+              name="adresse"
+              type="text"
+              autocomplete="off"
+              placeholder="Commence à taper… (ex: 44 route nationale Brunoy)"
+              value="{{ form.adresse if form else '' }}"
+            />
+            <div class="help">Suggestions automatiques via l’API GeoPF (IGN). Choisis une suggestion pour valider.</div>
 
-          <div class="field">
-            <label for="ville">Ville</label>
-            <input id="ville" name="ville" type="text" placeholder="Grenoble" value="{{ form.ville if form else '' }}" />
-          </div>
+            <div id="addr-box" class="addr-box" hidden>
+              <div class="addr-status" id="addr-status"></div>
+              <ul class="addr-list" id="addr-list"></ul>
+            </div>
 
-          <div class="field">
-            <label for="code_postal">Code postal</label>
-            <input id="code_postal" name="code_postal" type="text" placeholder="38000" value="{{ form.code_postal if form else '' }}" />
-          </div>
-
-          <div class="field">
-            <label for="surface_habitable">Surface habitable (m²)</label>
-            <input id="surface_habitable" name="surface_habitable" type="number" min="0" step="1" placeholder="85" value="{{ form.surface_habitable if form else '' }}" />
-          </div>
-
-          <div class="field">
-            <label for="nombre_pieces">Nombre de pièces</label>
-            <input id="nombre_pieces" name="nombre_pieces" type="number" min="0" step="1" placeholder="4" value="{{ form.nombre_pieces if form else '' }}" />
+            <!-- Renseigné par le JS lors du choix d’une suggestion -->
+            <input type="hidden" name="adresse_fulltext" id="adresse_fulltext" value="{{ form.adresse_fulltext if form else '' }}" />
+            <input type="hidden" name="adresse_x" id="adresse_x" value="{{ form.adresse_x if form else '' }}" />
+            <input type="hidden" name="adresse_y" id="adresse_y" value="{{ form.adresse_y if form else '' }}" />
+            <input type="hidden" name="adresse_city" id="adresse_city" value="{{ form.adresse_city if form else '' }}" />
+            <input type="hidden" name="adresse_zipcode" id="adresse_zipcode" value="{{ form.adresse_zipcode if form else '' }}" />
+            <input type="hidden" name="adresse_kind" id="adresse_kind" value="{{ form.adresse_kind if form else '' }}" />
+            <input type="hidden" name="adresse_source" id="adresse_source" value="geopf-completion" />
           </div>
 
           <div class="field full">
@@ -204,5 +236,131 @@
       </form>
     </div>
   </div>
+  <script>
+    const input = document.getElementById('adresse');
+    const box = document.getElementById('addr-box');
+    const list = document.getElementById('addr-list');
+    const statusEl = document.getElementById('addr-status');
+
+    const hidden = {
+      fulltext: document.getElementById('adresse_fulltext'),
+      x: document.getElementById('adresse_x'),
+      y: document.getElementById('adresse_y'),
+      city: document.getElementById('adresse_city'),
+      zipcode: document.getElementById('adresse_zipcode'),
+      kind: document.getElementById('adresse_kind'),
+    };
+
+    function clearSelection() {
+      hidden.fulltext.value = '';
+      hidden.x.value = '';
+      hidden.y.value = '';
+      hidden.city.value = '';
+      hidden.zipcode.value = '';
+      hidden.kind.value = '';
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function showBox() {
+      box.hidden = false;
+    }
+
+    function hideBox() {
+      box.hidden = true;
+      list.innerHTML = '';
+      setStatus('');
+    }
+
+    function renderResults(results) {
+      list.innerHTML = '';
+      if (!results || results.length === 0) {
+        setStatus('Aucune suggestion');
+        return;
+      }
+
+      setStatus('Choisis une suggestion :');
+
+      results.forEach((r) => {
+        const li = document.createElement('li');
+        li.className = 'addr-item';
+
+        const main = document.createElement('div');
+        main.className = 'addr-main';
+        main.textContent = r.fulltext || 'Suggestion';
+
+        const meta = document.createElement('div');
+        meta.className = 'addr-meta';
+        meta.textContent = [r.kind, r.city, r.zipcode].filter(Boolean).join(' · ');
+
+        li.appendChild(main);
+        li.appendChild(meta);
+
+        li.addEventListener('click', () => {
+          input.value = r.fulltext || input.value;
+          hidden.fulltext.value = r.fulltext || '';
+          hidden.x.value = (r.x ?? '');
+          hidden.y.value = (r.y ?? '');
+          hidden.city.value = r.city || '';
+          hidden.zipcode.value = r.zipcode || '';
+          hidden.kind.value = r.kind || '';
+          hideBox();
+        });
+
+        list.appendChild(li);
+      });
+    }
+
+    let lastQuery = '';
+    let timer = null;
+
+    async function fetchSuggestions(q) {
+      const url = new URL('https://data.geopf.fr/geocodage/completion');
+      url.searchParams.set('indices', 'portailCompletion');
+      url.searchParams.set('type', 'StreetAddress,PositionOfInterest');
+      url.searchParams.set('maximumResponses', '5');
+      url.searchParams.set('text', q);
+
+      const res = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('GeoPF error');
+      return await res.json();
+    }
+
+    input.addEventListener('input', () => {
+      const q = input.value.trim();
+      // if the user edits the input after selecting, clear hidden selection
+      clearSelection();
+
+      if (timer) clearTimeout(timer);
+
+      if (q.length < 4) {
+        hideBox();
+        return;
+      }
+
+      timer = setTimeout(async () => {
+        lastQuery = q;
+        showBox();
+        setStatus('Recherche…');
+
+        try {
+          const data = await fetchSuggestions(q);
+          // ignore out-of-order results
+          if (input.value.trim() !== lastQuery) return;
+          renderResults(data.results || []);
+        } catch (e) {
+          setStatus('Erreur de recherche');
+        }
+      }, 250);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!box.contains(e.target) && e.target !== input) {
+        hideBox();
+      }
+    });
+  </script>
 </body>
 </html>
