@@ -37,9 +37,18 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
 
+def ensure_tables() -> None:
+    """Best-effort table creation.
+
+    Railway sometimes races service startup vs DB readiness; also if the DB was reset,
+    the tables may not exist yet. For MVP we create them lazily.
+    """
+    with app.app_context():
+        db.create_all()
+
+
 # Create tables on startup (MVP). Later we can add migrations.
-with app.app_context():
-    db.create_all()
+ensure_tables()
 
 
 @app.get("/")
@@ -49,6 +58,7 @@ def home():
 
 @app.get("/questionnaire")
 def questionnaire():
+    ensure_tables()
     return render_template("questionnaire.html")
 
 
@@ -106,8 +116,19 @@ def submit_questionnaire():
         description=form["description"] or None,
     )
 
-    db.session.add(submission)
-    db.session.commit()
+    # If DB was reset and tables are missing, create and retry once.
+    try:
+        db.session.add(submission)
+        db.session.commit()
+    except Exception as e:
+        msg = str(e)
+        if "UndefinedTable" in msg or "does not exist" in msg or "relation \"property_submissions\" does not exist" in msg:
+            db.session.rollback()
+            ensure_tables()
+            db.session.add(submission)
+            db.session.commit()
+        else:
+            raise
 
     return redirect(url_for("thanks"))
 
