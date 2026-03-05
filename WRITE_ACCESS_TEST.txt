@@ -1,0 +1,3 @@
+If you can read this in a PR, the bot has write access and can push branches.
+
+Timestamp (UTC): 2026-03-05
