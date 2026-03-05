@@ -1,47 +1,30 @@
-﻿from flask_sqlalchemy import SQLAlchemy
-
-db = SQLAlchemy()
+from __future__ import annotations
 
 from flask_sqlalchemy import SQLAlchemy
 
+
 db = SQLAlchemy()
 
-class VendeurUser(db.Model):
-    __tablename__ = "vendeur_users"
+
+class PropertySubmission(db.Model):
+    __tablename__ = "property_submissions"
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # Role
-    role = db.Column(db.String(20), default="vendeur")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), nullable=False)
 
-    # Infos nécessaires
-    nom = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    telephone = db.Column(db.String(20), nullable=False)
+    # Contact
+    nom = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(200), nullable=False)
+    telephone = db.Column(db.String(40), nullable=False)
 
-    # Auth
-    password = db.Column(db.String(200), nullable=False)
+    # Property
+    adresse = db.Column(db.String(300), nullable=True)
+    ville = db.Column(db.String(120), nullable=True)
+    code_postal = db.Column(db.String(20), nullable=True)
 
+    prix = db.Column(db.Integer, nullable=True)
+    surface_habitable = db.Column(db.Integer, nullable=True)
+    nombre_pieces = db.Column(db.Integer, nullable=True)
 
-class BienImmobilier(db.Model):
-     __tablename__ = "vendeur_bien"
-
-     id = db.Column(db.Integer, primary_key=True)
-     
-     # Vendeur ID
-     vendeur_id = db.Column(db.Integer, db.ForeignKey("vendeur_users.id"), nullable=False)
-     
-     # Info du bien
-     adresse = db.Column(db.String(250), nullable=True)
-     prix = db.Column(db.Integer, nullable=True)
-     
-     description = db.Column(db.Text)
-     
-     # Info a partir de l'adresse
-     latitude = db.Column(db.Float)
-     longitude = db.Column(db.Float)
- 
-     # Vente
-     actif = db.Column(db.Boolean, default=True)  # "ne plus vendre" / "remettre en vente"
- 
-     vendeur = db.relationship("VendeurUser", backref="bien")
+    description = db.Column(db.Text, nullable=True)
