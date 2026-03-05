@@ -8,11 +8,15 @@ from models import db, PropertySubmission
 
 
 def _normalize_database_url(url: str) -> str:
-    """Railway provides DATABASE_URL. SQLAlchemy wants postgresql+psycopg2://."""
+    """Railway provides DATABASE_URL.
+
+    We use psycopg v3 (psycopg[binary]) to avoid system libpq deps.
+    SQLAlchemy URL should be: postgresql+psycopg://
+    """
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+psycopg2://", 1)
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
     if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
     return url
 
 
