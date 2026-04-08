@@ -167,7 +167,8 @@
 
         const url = new URL(window.location.origin + '/admin/api/cadastre/parcelle');
         url.searchParams.set('bbox', bbox);
-        url.searchParams.set('samples', '25');
+        url.searchParams.set('samples', '9');
+        url.searchParams.set('budget', '20');
 
         const res = await fetch(url.toString());
         const data = await res.json().catch(() => ({}));
