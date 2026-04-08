@@ -157,13 +157,18 @@
       }
     }
 
-    async function loadCadastre(commune) {
+    async function loadCadastreView() {
       const status = document.getElementById('cadStatus');
-      status.textContent = 'Cadastre: chargement… (ça peut être long)';
+      status.textContent = 'Cadastre: chargement (bbox de la vue)…';
 
       try {
+        const b = map.getBounds();
+        const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
+
         const url = new URL(window.location.origin + '/admin/api/cadastre/parcelle');
-        url.searchParams.set('commune', commune);
+        url.searchParams.set('bbox', bbox);
+        url.searchParams.set('samples', '25');
+
         const res = await fetch(url.toString());
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -175,10 +180,7 @@
         cadastreLayer.addData(data.data);
         cadastreLayer.addTo(map);
 
-        const b = cadastreLayer.getBounds();
-        if (b.isValid()) map.fitBounds(b.pad(0.08));
-
-        status.textContent = `Cadastre: OK — ${data.insee} (${(data.data.features||[]).length} parcelles)`;
+        status.textContent = `Cadastre: OK — ~${data.featureCount || (data.data.features||[]).length} parcelles (échantillonnage)`;
       } catch (e) {
         status.textContent = 'Cadastre: ' + (e && e.message ? e.message : 'erreur de chargement');
       }
@@ -198,9 +200,16 @@
       });
 
       cadBtn.addEventListener('click', () => {
-        const c = (input.value || '').trim();
-        if (!c) return;
-        loadCadastre(c);
+        // bbox of current view (no need for commune)
+        loadCadastreView();
+      });
+
+      // Auto-reload cadastre when moving the map (if layer is enabled)
+      let cadTimer = null;
+      map.on('moveend', () => {
+        if (!map.hasLayer(cadastreLayer)) return;
+        if (cadTimer) clearTimeout(cadTimer);
+        cadTimer = setTimeout(loadCadastreView, 350);
       });
     }, 0);
 

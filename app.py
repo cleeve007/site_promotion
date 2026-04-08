@@ -279,19 +279,85 @@ def admin_api_plu_zone_urba():
 @app.get("/admin/api/cadastre/parcelle")
 @admin_required
 def admin_api_cadastre_parcelle():
-    """Fetch cadastre parcels for a commune INSEE code.
+    """Fetch cadastre parcels.
 
-    Query:
-      - ?insee=59143
-      - or ?commune=Grenoble (will resolve to INSEE)
+    Notes:
+    - APIcarto cadastre/parcelle is reliable for point queries (lon/lat).
+    - Bulk queries by commune INSEE can be very large and may timeout.
 
-    Returns GeoJSON FeatureCollection from APIcarto.
+    Modes:
+      1) Point: ?lon=2.35&lat=48.85
+      2) Commune (heavy): ?insee=59143 OR ?commune=Grenoble
+      3) View sampling (approx): ?bbox=minLon,minLat,maxLon,maxLat[&samples=16]
+
+    The view sampling mode approximates "bbox de la vue" by sampling a grid of points
+    and requesting the parcel at each point, then deduplicating.
     """
+    cad_url = "https://apicarto.ign.fr/api/cadastre/parcelle"
+
+    lon = (request.args.get("lon") or "").strip()
+    lat = (request.args.get("lat") or "").strip()
+    bbox = (request.args.get("bbox") or "").strip()
+
+    # Mode 1: point
+    if lon and lat:
+        z = requests.get(cad_url, params={"lon": lon, "lat": lat}, timeout=30)
+        z.raise_for_status()
+        return jsonify({"mode": "point", "data": z.json()})
+
+    # Mode 3: view sampling
+    if bbox:
+        try:
+            minlon_s, minlat_s, maxlon_s, maxlat_s = bbox.split(",")
+            minlon, minlat, maxlon, maxlat = map(float, (minlon_s, minlat_s, maxlon_s, maxlat_s))
+        except Exception:
+            return jsonify({"error": "bad_bbox"}), 400
+
+        samples = int((request.args.get("samples") or "16").strip() or "16")
+        samples = max(4, min(samples, 36))
+
+        # Build a square-ish grid
+        n = int(samples ** 0.5)
+        n = max(2, n)
+        xs = [minlon + (maxlon - minlon) * (i + 0.5) / n for i in range(n)]
+        ys = [minlat + (maxlat - minlat) * (j + 0.5) / n for j in range(n)]
+
+        features = []
+        seen = set()
+        req_count = 0
+
+        for y in ys:
+            for x in xs:
+                req_count += 1
+                try:
+                    z = requests.get(cad_url, params={"lon": x, "lat": y}, timeout=12)
+                    z.raise_for_status()
+                    fc = z.json() or {}
+                    for f in fc.get("features") or []:
+                        props = f.get("properties") or {}
+                        key = props.get("idu") or (props.get("section"), props.get("numero"), props.get("code_insee"))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        features.append(f)
+                except Exception:
+                    # Ignore failed samples
+                    continue
+
+        return jsonify({
+            "mode": "view-sampling",
+            "bbox": [minlon, minlat, maxlon, maxlat],
+            "sampleRequests": req_count,
+            "featureCount": len(features),
+            "data": {"type": "FeatureCollection", "features": features},
+        })
+
+    # Mode 2: commune (heavy)
     insee = (request.args.get("insee") or "").strip()
     commune = (request.args.get("commune") or "").strip()
 
     if not insee and not commune:
-        return jsonify({"error": "missing_insee_or_commune"}), 400
+        return jsonify({"error": "missing_params"}), 400
 
     if not insee and commune:
         # Resolve commune -> centre -> insee via APIcarto limites-admin
@@ -305,10 +371,10 @@ def admin_api_cadastre_parcelle():
         centre = (communes[0].get("centre") or {}).get("coordinates")
         if not centre or len(centre) != 2:
             return jsonify({"error": "no_centre"}), 502
-        lon, lat = centre[0], centre[1]
+        lon2, lat2 = centre[0], centre[1]
 
         adm_url = "https://apicarto.ign.fr/api/limites-administratives/commune"
-        a = requests.get(adm_url, params={"lon": lon, "lat": lat}, timeout=30)
+        a = requests.get(adm_url, params={"lon": lon2, "lat": lat2}, timeout=30)
         a.raise_for_status()
         fc_adm = a.json() or {}
         feats = fc_adm.get("features") or []
@@ -319,9 +385,7 @@ def admin_api_cadastre_parcelle():
         if not insee:
             return jsonify({"error": "no_insee"}), 502
 
-    cad_url = "https://apicarto.ign.fr/api/cadastre/parcelle"
-
-    # Warning: can be large. For some communes this can be slow.
+    # Warning: can be large.
     try:
         z = requests.get(cad_url, params={"code_insee": insee}, timeout=180)
         z.raise_for_status()
@@ -329,11 +393,11 @@ def admin_api_cadastre_parcelle():
     except requests.exceptions.Timeout:
         return jsonify({
             "error": "timeout",
-            "message": "Le cadastre est trop long à charger pour cette commune. On pourra optimiser (bbox / chargement par tuiles).",
+            "message": "Le cadastre est trop long à charger pour cette commune. Utilise le mode bbox de la vue.",
             "insee": insee,
         }), 504
 
-    return jsonify({"insee": insee, "data": fc})
+    return jsonify({"mode": "commune", "insee": insee, "data": fc})
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
