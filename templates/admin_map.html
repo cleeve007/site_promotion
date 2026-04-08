@@ -35,12 +35,17 @@
     const points = {{ points|tojson }};
 
     const map = L.map('map');
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
+    // Base layers
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
+    osm.addTo(map);
+
+    // Overlay: submissions
+    const submissionsLayer = L.layerGroup().addTo(map);
     const markers = [];
 
     points.forEach((p) => {
-      const marker = L.marker([p.y, p.x]).addTo(map);
+      const marker = L.marker([p.y, p.x]).addTo(submissionsLayer);
       markers.push(marker);
 
       const html = `
@@ -59,6 +64,95 @@
 
       marker.bindPopup(html);
     });
+
+    // Overlay: PLU zones (GPU zone-urba)
+    const pluZonesLayer = L.geoJSON(null, {
+      style: (feature) => {
+        const t = (feature.properties || {}).typezone;
+        const color = (t === 'U') ? '#22c55e' : (t === 'AU' ? '#f59e0b' : '#7c5cff');
+        return { color, weight: 1, fillColor: color, fillOpacity: 0.18 };
+      },
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const title = `${p.typezone || ''} ${p.libelle || ''}`.trim();
+        layer.bindPopup(`<b>${title || 'Zone'}</b><br>IDURBA: ${p.idurba || ''}`);
+      }
+    });
+
+    // Layer control
+    const baseLayers = { 'OpenStreetMap': osm };
+    const overlays = {
+      'Submissions': submissionsLayer,
+      'PLU (GPU) — zones U/AU': pluZonesLayer,
+    };
+
+    L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
+
+    // Commune search control (simple)
+    const SearchControl = L.Control.extend({
+      onAdd: function() {
+        const div = L.DomUtil.create('div');
+        div.style.background = 'rgba(0,0,0,.35)';
+        div.style.backdropFilter = 'blur(8px)';
+        div.style.border = '1px solid rgba(255,255,255,.14)';
+        div.style.borderRadius = '14px';
+        div.style.padding = '10px';
+        div.style.color = '#eaf0ff';
+        div.style.minWidth = '260px';
+
+        div.innerHTML = `
+          <div style="font-weight:900;margin-bottom:6px;">PLU (GPU) — zone-urba</div>
+          <div style="display:flex;gap:8px;">
+            <input id="communeInput" placeholder="Commune (ex: Grenoble)" style="flex:1; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.10); color:#eaf0ff;" />
+            <button id="loadPluBtn" style="padding:10px 12px; border-radius:12px; border:0; background: linear-gradient(135deg,#7c5cff,#22c55e); font-weight:900; cursor:pointer;">Charger</button>
+          </div>
+          <div id="pluStatus" style="margin-top:6px; font-size:12px; color: rgba(234,240,255,.75);"></div>
+        `;
+
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+      }
+    });
+
+    map.addControl(new SearchControl({ position: 'topright' }));
+
+    async function loadPluZones(commune) {
+      const status = document.getElementById('pluStatus');
+      status.textContent = 'Chargement…';
+
+      try {
+        const url = new URL(window.location.origin + '/admin/api/plu/zone-urba');
+        url.searchParams.set('commune', commune);
+        url.searchParams.set('buildable', '1');
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        pluZonesLayer.clearLayers();
+        pluZonesLayer.addData(data.data);
+        pluZonesLayer.addTo(map);
+
+        // Fit bounds
+        const b = pluZonesLayer.getBounds();
+        if (b.isValid()) map.fitBounds(b.pad(0.08));
+
+        status.textContent = `OK — ${data.commune.nom} (${(data.data.features||[]).length} zones)`;
+      } catch (e) {
+        status.textContent = 'Erreur: impossible de charger les zones';
+      }
+    }
+
+    // Wire up button
+    setTimeout(() => {
+      const btn = document.getElementById('loadPluBtn');
+      const input = document.getElementById('communeInput');
+      if (!btn || !input) return;
+      btn.addEventListener('click', () => {
+        const c = (input.value || '').trim();
+        if (!c) return;
+        loadPluZones(c);
+      });
+    }, 0);
 
     if (markers.length > 0) {
       const group = L.featureGroup(markers);

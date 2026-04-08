@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 
-from flask import Flask, render_template, redirect, url_for, request, session, abort
+import requests
+
+from flask import Flask, render_template, redirect, url_for, request, session, abort, jsonify
 
 from models import db, PropertySubmission
 
@@ -194,6 +196,63 @@ def admin_map():
     ]
 
     return render_template("admin_map.html", points=points)
+
+
+@app.get("/admin/api/plu/zone-urba")
+@admin_required
+def admin_api_plu_zone_urba():
+    """Fetch PLU/GPU urban zones via APIcarto.
+
+    Query: ?commune=Grenoble
+    We resolve the commune outline via geo.api.gouv.fr, then query APIcarto with geom=<geojson>.
+    """
+    commune = (request.args.get("commune") or "").strip()
+    if not commune:
+        return jsonify({"error": "missing_commune"}), 400
+
+    # Get commune contour geometry (GeoJSON) from geo.api.gouv.fr
+    gouv_url = "https://geo.api.gouv.fr/communes"
+    params = {
+        "nom": commune,
+        "fields": "nom,code,centre,contour",
+        "format": "json",
+        "geometry": "contour",
+    }
+    r = requests.get(gouv_url, params=params, timeout=20)
+    r.raise_for_status()
+    communes = r.json() or []
+    if not communes:
+        return jsonify({"error": "commune_not_found"}), 404
+
+    # Pick the best match (first result). Later: let user disambiguate.
+    c = communes[0]
+    contour = c.get("contour")
+    if not contour:
+        return jsonify({"error": "no_contour"}), 502
+
+    # APIcarto expects geom as a URL-encoded GeoJSON geometry.
+    apicarto_url = "https://apicarto.ign.fr/api/gpu/zone-urba"
+    prepared = requests.Request("GET", apicarto_url, params={"geom": contour}).prepare()
+
+    z = requests.get(prepared.url, timeout=40)
+    z.raise_for_status()
+    fc = z.json()
+
+    # Optional: keep only potentially buildable zones (U and AU)
+    only_buildable = (request.args.get("buildable") or "1") == "1"
+    if only_buildable and isinstance(fc, dict) and isinstance(fc.get("features"), list):
+        fc["features"] = [
+            f for f in fc["features"]
+            if (f.get("properties") or {}).get("typezone") in ("U", "AU")
+        ]
+
+    return jsonify({
+        "commune": {
+            "nom": c.get("nom"),
+            "code": c.get("code"),
+        },
+        "data": fc,
+    })
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
