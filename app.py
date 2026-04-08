@@ -204,19 +204,22 @@ def admin_api_plu_zone_urba():
     """Fetch PLU/GPU urban zones via APIcarto.
 
     Query: ?commune=Grenoble
-    We resolve the commune outline via geo.api.gouv.fr, then query APIcarto with geom=<geojson>.
+
+    Correct API usage:
+    1) Resolve a coordinate for the commune name
+    2) Call APIcarto limites-administratives/commune?lon={x}&lat={y} to get INSEE
+    3) Call GPU zone-urba with partition=DU_{INSEE}
     """
     commune = (request.args.get("commune") or "").strip()
     if not commune:
         return jsonify({"error": "missing_commune"}), 400
 
-    # Get commune contour geometry (GeoJSON) from geo.api.gouv.fr
+    # 1) Resolve commune -> a coordinate (centre) using geo.api.gouv.fr
     gouv_url = "https://geo.api.gouv.fr/communes"
     params = {
         "nom": commune,
-        "fields": "nom,code,centre,contour",
+        "fields": "nom,code,centre",
         "format": "json",
-        "geometry": "contour",
     }
     r = requests.get(gouv_url, params=params, timeout=20)
     r.raise_for_status()
@@ -224,17 +227,32 @@ def admin_api_plu_zone_urba():
     if not communes:
         return jsonify({"error": "commune_not_found"}), 404
 
-    # Pick the best match (first result). Later: let user disambiguate.
     c = communes[0]
-    contour = c.get("contour")
-    if not contour:
-        return jsonify({"error": "no_contour"}), 502
+    centre = (c.get("centre") or {}).get("coordinates")
+    if not centre or len(centre) != 2:
+        return jsonify({"error": "no_centre"}), 502
 
-    # APIcarto expects geom as a URL-encoded GeoJSON geometry.
+    lon, lat = centre[0], centre[1]
+
+    # 2) Get INSEE from APIcarto
+    adm_url = "https://apicarto.ign.fr/api/limites-administratives/commune"
+    a = requests.get(adm_url, params={"lon": lon, "lat": lat}, timeout=30)
+    a.raise_for_status()
+    fc_adm = a.json() or {}
+    features = fc_adm.get("features") or []
+    if not features:
+        return jsonify({"error": "apicarto_commune_not_found"}), 404
+
+    props = (features[0] or {}).get("properties") or {}
+    insee = props.get("insee_com") or props.get("insee_arr")
+    if not insee:
+        return jsonify({"error": "no_insee"}), 502
+
+    partition = f"DU_{insee}"
+
+    # 3) Query GPU zone-urba by partition
     apicarto_url = "https://apicarto.ign.fr/api/gpu/zone-urba"
-    prepared = requests.Request("GET", apicarto_url, params={"geom": contour}).prepare()
-
-    z = requests.get(prepared.url, timeout=40)
+    z = requests.get(apicarto_url, params={"partition": partition}, timeout=60)
     z.raise_for_status()
     fc = z.json()
 
@@ -250,6 +268,8 @@ def admin_api_plu_zone_urba():
         "commune": {
             "nom": c.get("nom"),
             "code": c.get("code"),
+            "insee": insee,
+            "partition": partition,
         },
         "data": fc,
     })
