@@ -321,10 +321,17 @@ def admin_api_cadastre_parcelle():
 
     cad_url = "https://apicarto.ign.fr/api/cadastre/parcelle"
 
-    # Warning: can be large. Start with code_insee. Can be optimized later with bbox.
-    z = requests.get(cad_url, params={"code_insee": insee}, timeout=90)
-    z.raise_for_status()
-    fc = z.json()
+    # Warning: can be large. For some communes this can be slow.
+    try:
+        z = requests.get(cad_url, params={"code_insee": insee}, timeout=180)
+        z.raise_for_status()
+        fc = z.json()
+    except requests.exceptions.Timeout:
+        return jsonify({
+            "error": "timeout",
+            "message": "Le cadastre est trop long à charger pour cette commune. On pourra optimiser (bbox / chargement par tuiles).",
+            "insee": insee,
+        }), 504
 
     return jsonify({"insee": insee, "data": fc})
 

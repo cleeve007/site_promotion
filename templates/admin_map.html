@@ -165,8 +165,11 @@
         const url = new URL(window.location.origin + '/admin/api/cadastre/parcelle');
         url.searchParams.set('commune', commune);
         const res = await fetch(url.toString());
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = (data && data.message) ? data.message : ('HTTP ' + res.status);
+          throw new Error(msg);
+        }
 
         cadastreLayer.clearLayers();
         cadastreLayer.addData(data.data);
@@ -177,7 +180,7 @@
 
         status.textContent = `Cadastre: OK — ${data.insee} (${(data.data.features||[]).length} parcelles)`;
       } catch (e) {
-        status.textContent = 'Cadastre: erreur de chargement';
+        status.textContent = 'Cadastre: ' + (e && e.message ? e.message : 'erreur de chargement');
       }
     }
 
