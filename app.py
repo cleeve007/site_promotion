@@ -307,14 +307,22 @@ def admin_api_cadastre_parcelle():
 
     # Mode 3: view sampling
     if bbox:
+        import time
+
         try:
             minlon_s, minlat_s, maxlon_s, maxlat_s = bbox.split(",")
             minlon, minlat, maxlon, maxlat = map(float, (minlon_s, minlat_s, maxlon_s, maxlat_s))
         except Exception:
             return jsonify({"error": "bad_bbox"}), 400
 
-        samples = int((request.args.get("samples") or "16").strip() or "16")
-        samples = max(4, min(samples, 36))
+        # Default lower to avoid worker timeouts.
+        samples = int((request.args.get("samples") or "9").strip() or "9")
+        samples = max(4, min(samples, 25))
+
+        # Hard time budget so we don't hit gunicorn worker timeout.
+        budget_sec = float((request.args.get("budget") or "20").strip() or "20")
+        budget_sec = max(5.0, min(budget_sec, 60.0))
+        t0 = time.monotonic()
 
         # Build a square-ish grid
         n = int(samples ** 0.5)
@@ -325,12 +333,16 @@ def admin_api_cadastre_parcelle():
         features = []
         seen = set()
         req_count = 0
+        timed_out = 0
 
         for y in ys:
             for x in xs:
+                if time.monotonic() - t0 > budget_sec:
+                    break
                 req_count += 1
                 try:
-                    z = requests.get(cad_url, params={"lon": x, "lat": y}, timeout=12)
+                    # Keep per-sample timeout small.
+                    z = requests.get(cad_url, params={"lon": x, "lat": y}, timeout=4)
                     z.raise_for_status()
                     fc = z.json() or {}
                     for f in fc.get("features") or []:
@@ -340,15 +352,22 @@ def admin_api_cadastre_parcelle():
                             continue
                         seen.add(key)
                         features.append(f)
-                except Exception:
-                    # Ignore failed samples
+                except requests.exceptions.Timeout:
+                    timed_out += 1
                     continue
+                except Exception:
+                    continue
+            else:
+                continue
+            break
 
         return jsonify({
             "mode": "view-sampling",
             "bbox": [minlon, minlat, maxlon, maxlat],
             "sampleRequests": req_count,
             "featureCount": len(features),
+            "timedOutSamples": timed_out,
+            "budgetSec": budget_sec,
             "data": {"type": "FeatureCollection", "features": features},
         })
 
