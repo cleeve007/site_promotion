@@ -181,7 +181,10 @@
         cadastreLayer.addData(data.data);
         cadastreLayer.addTo(map);
 
-        status.textContent = `Cadastre: OK — ~${data.featureCount || (data.data.features||[]).length} parcelles (échantillonnage)`;
+        const count = data.featureCount || (data.data.features||[]).length;
+        const timeouts = data.timedOutSamples ?? 0;
+        const failed = data.failedSamples ?? 0;
+        status.textContent = `Cadastre: OK — ~${count} parcelles (échantillonnage) · timeouts=${timeouts} · failed=${failed}`;
       } catch (e) {
         status.textContent = 'Cadastre: ' + (e && e.message ? e.message : 'erreur de chargement');
       }

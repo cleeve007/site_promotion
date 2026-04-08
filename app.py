@@ -334,6 +334,29 @@ def admin_api_cadastre_parcelle():
         seen = set()
         req_count = 0
         timed_out = 0
+        failed = 0
+
+        def add_features(fc: dict) -> None:
+            nonlocal features, seen
+            for f in fc.get("features") or []:
+                props = f.get("properties") or {}
+                key = props.get("idu") or (props.get("section"), props.get("numero"), props.get("code_insee"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                features.append(f)
+
+        # Always sample the view center first (most likely to hit a parcel)
+        cx, cy = (minlon + maxlon) / 2.0, (minlat + maxlat) / 2.0
+        try:
+            req_count += 1
+            zc = requests.get(cad_url, params={"lon": cx, "lat": cy}, timeout=8)
+            zc.raise_for_status()
+            add_features(zc.json() or {})
+        except requests.exceptions.Timeout:
+            timed_out += 1
+        except Exception:
+            failed += 1
 
         for y in ys:
             for x in xs:
@@ -342,20 +365,14 @@ def admin_api_cadastre_parcelle():
                 req_count += 1
                 try:
                     # Keep per-sample timeout small.
-                    z = requests.get(cad_url, params={"lon": x, "lat": y}, timeout=4)
+                    z = requests.get(cad_url, params={"lon": x, "lat": y}, timeout=5)
                     z.raise_for_status()
-                    fc = z.json() or {}
-                    for f in fc.get("features") or []:
-                        props = f.get("properties") or {}
-                        key = props.get("idu") or (props.get("section"), props.get("numero"), props.get("code_insee"))
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        features.append(f)
+                    add_features(z.json() or {})
                 except requests.exceptions.Timeout:
                     timed_out += 1
                     continue
                 except Exception:
+                    failed += 1
                     continue
             else:
                 continue
@@ -367,6 +384,7 @@ def admin_api_cadastre_parcelle():
             "sampleRequests": req_count,
             "featureCount": len(features),
             "timedOutSamples": timed_out,
+            "failedSamples": failed,
             "budgetSec": budget_sec,
             "data": {"type": "FeatureCollection", "features": features},
         })
