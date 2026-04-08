@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin — Submissions</title>
+  <style>
+    :root{--bg:#0b1220;--panel:rgba(255,255,255,.08);--line:rgba(255,255,255,.14);--text:#eaf0ff;--muted:rgba(234,240,255,.75)}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#0b1220,#050817);color:var(--text)}
+    .wrap{width:min(1100px,calc(100% - 32px));margin:0 auto;padding:26px 0 60px}
+    .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+    a{color:inherit;text-decoration:none}
+    .btn{display:inline-flex;gap:10px;align-items:center;justify-content:center;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.10);font-weight:900}
+    .grid{margin-top:14px;display:grid;gap:12px}
+    .card{border:1px solid var(--line);background:var(--panel);border-radius:18px;padding:14px}
+    .muted{color:var(--muted)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,.10);vertical-align:top;font-size:14px}
+    th{text-align:left;color:var(--muted);font-weight:800}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1 style="margin:0">Admin — Submissions</h1>
+        <p class="muted" style="margin:6px 0 0">Total: {{ submissions|length }}</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="{{ url_for('admin_map') }}">Voir la map</a>
+        <a class="btn" href="{{ url_for('admin_logout') }}">Logout</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Date</th>
+              <th>Contact</th>
+              <th>Adresse</th>
+              <th>Prix</th>
+              <th>Description</th>
+              <th>Coords</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for s in submissions %}
+            <tr>
+              <td><code>{{ s.id }}</code></td>
+              <td>{{ s.created_at }}</td>
+              <td>
+                <div><strong>{{ s.nom }}</strong></div>
+                <div class="muted">{{ s.email }}</div>
+                <div class="muted">{{ s.telephone }}</div>
+              </td>
+              <td>
+                <div><strong>{{ s.adresse_fulltext or s.adresse or '' }}</strong></div>
+                <div class="muted">{{ s.adresse_city or '' }} {{ s.adresse_zipcode or '' }}</div>
+                <div class="muted"><code>{{ s.adresse_kind or '' }}</code></div>
+              </td>
+              <td>{{ s.prix or '' }}</td>
+              <td class="muted">{{ s.description or '' }}</td>
+              <td class="muted"><code>{{ s.adresse_x or '' }}, {{ s.adresse_y or '' }}</code></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

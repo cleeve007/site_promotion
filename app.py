@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 
-from flask import Flask, render_template, redirect, url_for, request
+from flask import Flask, render_template, redirect, url_for, request, session, abort
 
 from models import db, PropertySubmission
+
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 
 def _normalize_database_url(url: str) -> str:
@@ -49,6 +52,21 @@ def ensure_tables() -> None:
 
 # Create tables on startup (MVP). Later we can add migrations.
 ensure_tables()
+
+
+from functools import wraps
+
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not ADMIN_PASSWORD:
+            abort(500, description="ADMIN_PASSWORD is not set")
+        if session.get("is_admin") is True:
+            return fn(*args, **kwargs)
+        return redirect(url_for("admin_login"))
+
+    return wrapper
 
 
 @app.get("/")
@@ -136,6 +154,64 @@ def submit_questionnaire():
 @app.get("/merci")
 def thanks():
     return render_template("thanks.html")
+
+
+@app.get("/admin")
+@admin_required
+def admin_list():
+    ensure_tables()
+    submissions = PropertySubmission.query.order_by(PropertySubmission.id.desc()).all()
+    return render_template("admin_list.html", submissions=submissions)
+
+
+@app.get("/admin/map")
+@admin_required
+def admin_map():
+    ensure_tables()
+    rows = (
+        PropertySubmission.query
+        .filter(PropertySubmission.adresse_x.isnot(None))
+        .filter(PropertySubmission.adresse_y.isnot(None))
+        .order_by(PropertySubmission.id.desc())
+        .all()
+    )
+
+    points = [
+        {
+            "id": r.id,
+            "nom": r.nom,
+            "email": r.email,
+            "telephone": r.telephone,
+            "adresse": r.adresse_fulltext or r.adresse,
+            "city": r.adresse_city,
+            "zipcode": r.adresse_zipcode,
+            "prix": r.prix,
+            "description": r.description,
+            "x": r.adresse_x,
+            "y": r.adresse_y,
+        }
+        for r in rows
+    ]
+
+    return render_template("admin_map.html", points=points)
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        pw = request.form.get("password", "")
+        if ADMIN_PASSWORD and pw == ADMIN_PASSWORD:
+            session["is_admin"] = True
+            return redirect(url_for("admin_list"))
+        return render_template("admin_login.html", error="Mot de passe incorrect")
+
+    return render_template("admin_login.html")
+
+
+@app.get("/admin/logout")
+def admin_logout():
+    session.pop("is_admin", None)
+    return redirect(url_for("admin_login"))
 
 
 if __name__ == "__main__":
