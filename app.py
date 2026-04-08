@@ -270,9 +270,63 @@ def admin_api_plu_zone_urba():
             "code": c.get("code"),
             "insee": insee,
             "partition": partition,
+            "centre": {"lon": lon, "lat": lat},
         },
         "data": fc,
     })
+
+
+@app.get("/admin/api/cadastre/parcelle")
+@admin_required
+def admin_api_cadastre_parcelle():
+    """Fetch cadastre parcels for a commune INSEE code.
+
+    Query:
+      - ?insee=59143
+      - or ?commune=Grenoble (will resolve to INSEE)
+
+    Returns GeoJSON FeatureCollection from APIcarto.
+    """
+    insee = (request.args.get("insee") or "").strip()
+    commune = (request.args.get("commune") or "").strip()
+
+    if not insee and not commune:
+        return jsonify({"error": "missing_insee_or_commune"}), 400
+
+    if not insee and commune:
+        # Resolve commune -> centre -> insee via APIcarto limites-admin
+        gouv_url = "https://geo.api.gouv.fr/communes"
+        params = {"nom": commune, "fields": "nom,code,centre", "format": "json"}
+        r = requests.get(gouv_url, params=params, timeout=20)
+        r.raise_for_status()
+        communes = r.json() or []
+        if not communes:
+            return jsonify({"error": "commune_not_found"}), 404
+        centre = (communes[0].get("centre") or {}).get("coordinates")
+        if not centre or len(centre) != 2:
+            return jsonify({"error": "no_centre"}), 502
+        lon, lat = centre[0], centre[1]
+
+        adm_url = "https://apicarto.ign.fr/api/limites-administratives/commune"
+        a = requests.get(adm_url, params={"lon": lon, "lat": lat}, timeout=30)
+        a.raise_for_status()
+        fc_adm = a.json() or {}
+        feats = fc_adm.get("features") or []
+        if not feats:
+            return jsonify({"error": "apicarto_commune_not_found"}), 404
+        props = (feats[0] or {}).get("properties") or {}
+        insee = props.get("insee_com") or props.get("insee_arr")
+        if not insee:
+            return jsonify({"error": "no_insee"}), 502
+
+    cad_url = "https://apicarto.ign.fr/api/cadastre/parcelle"
+
+    # Warning: can be large. Start with code_insee. Can be optimized later with bbox.
+    z = requests.get(cad_url, params={"code_insee": insee}, timeout=90)
+    z.raise_for_status()
+    fc = z.json()
+
+    return jsonify({"insee": insee, "data": fc})
 
 
 @app.route("/admin/login", methods=["GET", "POST"])

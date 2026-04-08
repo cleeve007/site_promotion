@@ -79,11 +79,23 @@
       }
     });
 
+    // Overlay: Cadastre parcels
+    const cadastreLayer = L.geoJSON(null, {
+      style: () => ({ color: '#38bdf8', weight: 1, fillColor: '#38bdf8', fillOpacity: 0.10 }),
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const cont = p.contenance ?? p.surface ?? p.area ?? '';
+        const id = p.id || p.numero || '';
+        layer.bindPopup(`<b>Parcelle</b><br>${id ? ('ID: ' + id + '<br>') : ''}${cont ? ('Contenance: ' + cont + ' m²') : ''}`);
+      }
+    });
+
     // Layer control
     const baseLayers = { 'OpenStreetMap': osm };
     const overlays = {
       'Submissions': submissionsLayer,
       'PLU (GPU) — zones U/AU': pluZonesLayer,
+      'Cadastre — parcelles': cadastreLayer,
     };
 
     L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
@@ -101,12 +113,15 @@
         div.style.minWidth = '260px';
 
         div.innerHTML = `
-          <div style="font-weight:900;margin-bottom:6px;">PLU (GPU) — zone-urba</div>
+          <div style="font-weight:900;margin-bottom:6px;">Couches APIcarto</div>
+          <div class="muted" style="font-size:12px;margin-bottom:8px;">Commune → PLU (U/AU) + Cadastre</div>
           <div style="display:flex;gap:8px;">
             <input id="communeInput" placeholder="Commune (ex: Grenoble)" style="flex:1; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.10); color:#eaf0ff;" />
-            <button id="loadPluBtn" style="padding:10px 12px; border-radius:12px; border:0; background: linear-gradient(135deg,#7c5cff,#22c55e); font-weight:900; cursor:pointer;">Charger</button>
+            <button id="loadPluBtn" title="Charger PLU" style="padding:10px 12px; border-radius:12px; border:0; background: linear-gradient(135deg,#7c5cff,#22c55e); font-weight:900; cursor:pointer;">PLU</button>
+            <button id="loadCadBtn" title="Charger Cadastre" style="padding:10px 12px; border-radius:12px; border:0; background: rgba(255,255,255,.14); color:#eaf0ff; font-weight:900; cursor:pointer;">Cadastre</button>
           </div>
           <div id="pluStatus" style="margin-top:6px; font-size:12px; color: rgba(234,240,255,.75);"></div>
+          <div id="cadStatus" style="margin-top:4px; font-size:12px; color: rgba(234,240,255,.75);"></div>
         `;
 
         L.DomEvent.disableClickPropagation(div);
@@ -118,7 +133,7 @@
 
     async function loadPluZones(commune) {
       const status = document.getElementById('pluStatus');
-      status.textContent = 'Chargement…';
+      status.textContent = 'PLU: chargement…';
 
       try {
         const url = new URL(window.location.origin + '/admin/api/plu/zone-urba');
@@ -136,21 +151,53 @@
         const b = pluZonesLayer.getBounds();
         if (b.isValid()) map.fitBounds(b.pad(0.08));
 
-        status.textContent = `OK — ${data.commune.nom} (${(data.data.features||[]).length} zones)`;
+        status.textContent = `PLU: OK — ${data.commune.nom} (${(data.data.features||[]).length} zones)`;
       } catch (e) {
-        status.textContent = 'Erreur: impossible de charger les zones';
+        status.textContent = 'PLU: erreur de chargement';
       }
     }
 
-    // Wire up button
+    async function loadCadastre(commune) {
+      const status = document.getElementById('cadStatus');
+      status.textContent = 'Cadastre: chargement… (ça peut être long)';
+
+      try {
+        const url = new URL(window.location.origin + '/admin/api/cadastre/parcelle');
+        url.searchParams.set('commune', commune);
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        cadastreLayer.clearLayers();
+        cadastreLayer.addData(data.data);
+        cadastreLayer.addTo(map);
+
+        const b = cadastreLayer.getBounds();
+        if (b.isValid()) map.fitBounds(b.pad(0.08));
+
+        status.textContent = `Cadastre: OK — ${data.insee} (${(data.data.features||[]).length} parcelles)`;
+      } catch (e) {
+        status.textContent = 'Cadastre: erreur de chargement';
+      }
+    }
+
+    // Wire up buttons
     setTimeout(() => {
-      const btn = document.getElementById('loadPluBtn');
+      const pluBtn = document.getElementById('loadPluBtn');
+      const cadBtn = document.getElementById('loadCadBtn');
       const input = document.getElementById('communeInput');
-      if (!btn || !input) return;
-      btn.addEventListener('click', () => {
+      if (!pluBtn || !cadBtn || !input) return;
+
+      pluBtn.addEventListener('click', () => {
         const c = (input.value || '').trim();
         if (!c) return;
         loadPluZones(c);
+      });
+
+      cadBtn.addEventListener('click', () => {
+        const c = (input.value || '').trim();
+        if (!c) return;
+        loadCadastre(c);
       });
     }, 0);
 
