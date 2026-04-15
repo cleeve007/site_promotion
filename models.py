@@ -32,3 +32,23 @@ class PropertySubmission(db.Model):
     prix = db.Column(db.Integer, nullable=True)
 
     description = db.Column(db.Text, nullable=True)
+
+    # Enrichment (async)
+    enrich_status = db.Column(db.String(40), nullable=True)  # queued|running|ok|error|skipped
+    enrich_error = db.Column(db.Text, nullable=True)
+    enriched_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Commune (APIcarto limites-admin)
+    commune_insee = db.Column(db.String(10), nullable=True)
+    commune_nom = db.Column(db.String(200), nullable=True)
+
+    # PLU (GPU zone-urba)
+    plu_typezone = db.Column(db.String(20), nullable=True)  # U / AU / ...
+    plu_libelle = db.Column(db.String(80), nullable=True)
+    plu_idurba = db.Column(db.String(80), nullable=True)
+
+    # Cadastre parcelle (par point)
+    cad_section = db.Column(db.String(10), nullable=True)
+    cad_numero = db.Column(db.String(20), nullable=True)
+    cad_contenance = db.Column(db.Integer, nullable=True)  # m²
+    cad_code_insee = db.Column(db.String(10), nullable=True)
