@@ -44,8 +44,9 @@
               <th>Contact</th>
               <th>Adresse</th>
               <th>Prix</th>
-              <th>Description</th>
-              <th>Coords</th>
+              <th>PLU</th>
+              <th>Cadastre</th>
+              <th>Enrich</th>
             </tr>
           </thead>
           <tbody>
@@ -62,10 +63,24 @@
                 <div><strong>{{ s.adresse_fulltext or s.adresse or '' }}</strong></div>
                 <div class="muted">{{ s.adresse_city or '' }} {{ s.adresse_zipcode or '' }}</div>
                 <div class="muted"><code>{{ s.adresse_kind or '' }}</code></div>
+                <div class="muted">INSEE: <code>{{ s.commune_insee or '' }}</code> {{ s.commune_nom or '' }}</div>
               </td>
               <td>{{ s.prix or '' }}</td>
-              <td class="muted">{{ s.description or '' }}</td>
-              <td class="muted"><code>{{ s.adresse_x or '' }}, {{ s.adresse_y or '' }}</code></td>
+              <td class="muted">
+                <div><code>{{ s.plu_typezone or '' }}</code> <code>{{ s.plu_libelle or '' }}</code></div>
+                <div class="muted"><code>{{ s.plu_idurba or '' }}</code></div>
+              </td>
+              <td class="muted">
+                <div>{{ s.cad_section or '' }} {{ s.cad_numero or '' }}</div>
+                <div class="muted">Contenance: {{ s.cad_contenance or '' }} m²</div>
+              </td>
+              <td class="muted">
+                <div>Status: <code>{{ s.enrich_status or '' }}</code></div>
+                {% if s.enrich_error %}<div class="muted">{{ s.enrich_error }}</div>{% endif %}
+                <form method="post" action="{{ url_for('admin_enrich_one', submission_id=s.id) }}">
+                  <button class="btn" type="submit">Relancer</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
           </tbody>

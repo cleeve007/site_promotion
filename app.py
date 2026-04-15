@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 
 import requests
 
@@ -10,6 +12,12 @@ from models import db, PropertySubmission
 
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+
+# Async enrichment controls
+ENRICH_ENABLED = (os.environ.get("ENRICH_ENABLED", "1") == "1")
+ENRICH_BATCH_ON_ADMIN = int(os.environ.get("ENRICH_BATCH_ON_ADMIN", "2") or "2")
+# In-process lock to avoid running too many enrichment jobs at once.
+_enrich_lock = threading.Semaphore(value=int(os.environ.get("ENRICH_CONCURRENCY", "1") or "1"))
 
 
 def _normalize_database_url(url: str) -> str:
@@ -69,6 +77,210 @@ def admin_required(fn):
         return redirect(url_for("admin_login"))
 
     return wrapper
+
+
+def _point_in_ring(lon: float, lat: float, ring: list) -> bool:
+    """Ray casting point-in-polygon for a linear ring in lon/lat."""
+    inside = False
+    n = len(ring)
+    if n < 4:
+        return False
+    x, y = lon, lat
+    for i in range(n - 1):
+        x1, y1 = ring[i]
+        x2, y2 = ring[i + 1]
+        # intersect with horizontal ray to +inf
+        if ((y1 > y) != (y2 > y)):
+            x_int = (x2 - x1) * (y - y1) / (y2 - y1 + 1e-18) + x1
+            if x_int > x:
+                inside = not inside
+    return inside
+
+
+def _point_in_geometry(lon: float, lat: float, geom: dict) -> bool:
+    if not geom:
+        return False
+    t = geom.get("type")
+    coords = geom.get("coordinates")
+    if not t or coords is None:
+        return False
+
+    if t == "Polygon":
+        # coords: [outer, hole1, ...]
+        outer = coords[0] if coords else None
+        if not outer or not _point_in_ring(lon, lat, outer):
+            return False
+        # holes
+        for hole in coords[1:] or []:
+            if hole and _point_in_ring(lon, lat, hole):
+                return False
+        return True
+
+    if t == "MultiPolygon":
+        for poly in coords or []:
+            if not poly:
+                continue
+            outer = poly[0] if poly else None
+            if not outer or not _point_in_ring(lon, lat, outer):
+                continue
+            in_hole = False
+            for hole in poly[1:] or []:
+                if hole and _point_in_ring(lon, lat, hole):
+                    in_hole = True
+                    break
+            if not in_hole:
+                return True
+        return False
+
+    return False
+
+
+def _fetch_commune_for_point(lon: float, lat: float) -> dict:
+    url = "https://apicarto.ign.fr/api/limites-administratives/commune"
+    r = requests.get(url, params={"lon": lon, "lat": lat}, timeout=20)
+    r.raise_for_status()
+    fc = r.json() or {}
+    feat = (fc.get("features") or [None])[0] or {}
+    props = feat.get("properties") or {}
+    return {
+        "insee": props.get("insee_com") or props.get("insee_arr"),
+        "nom": props.get("nom_com"),
+    }
+
+
+_gpu_cache = {}  # insee -> (ts, featurecollection)
+
+
+def _fetch_gpu_zone_urba(partition: str, ttl_sec: int = 300) -> dict:
+    now = time.time()
+    cached = _gpu_cache.get(partition)
+    if cached and (now - cached[0] < ttl_sec):
+        return cached[1]
+
+    url = "https://apicarto.ign.fr/api/gpu/zone-urba"
+    r = requests.get(url, params={"partition": partition}, timeout=40)
+    r.raise_for_status()
+    fc = r.json()
+    _gpu_cache[partition] = (now, fc)
+    return fc
+
+
+def _pick_plu_zone_for_point(lon: float, lat: float, fc: dict) -> dict | None:
+    for f in fc.get("features") or []:
+        geom = f.get("geometry")
+        if _point_in_geometry(lon, lat, geom):
+            return f
+    return None
+
+
+def _fetch_cadastre_for_point(lon: float, lat: float) -> dict:
+    url = "https://apicarto.ign.fr/api/cadastre/parcelle"
+    r = requests.get(url, params={"lon": lon, "lat": lat}, timeout=25)
+    r.raise_for_status()
+    fc = r.json() or {}
+    feat = (fc.get("features") or [None])[0] or {}
+    props = feat.get("properties") or {}
+    return {
+        "section": props.get("section"),
+        "numero": props.get("numero"),
+        "contenance": props.get("contenance"),
+        "code_insee": props.get("code_insee"),
+    }
+
+
+def enrich_submission_async(submission_id: int) -> None:
+    if not ENRICH_ENABLED:
+        return
+
+    def job():
+        if not _enrich_lock.acquire(blocking=False):
+            return
+        try:
+            with app.app_context():
+                ensure_tables()
+                s = PropertySubmission.query.get(submission_id)
+                if not s:
+                    return
+
+                # Skip if no coords
+                if s.adresse_x is None or s.adresse_y is None:
+                    s.enrich_status = "skipped"
+                    db.session.commit()
+                    return
+
+                s.enrich_status = "running"
+                s.enrich_error = None
+                db.session.commit()
+
+                lon, lat = float(s.adresse_x), float(s.adresse_y)
+
+                # 1) Commune
+                com = _fetch_commune_for_point(lon, lat)
+                s.commune_insee = com.get("insee")
+                s.commune_nom = com.get("nom")
+
+                # 2) PLU (GPU zone-urba)
+                if s.commune_insee:
+                    partition = f"DU_{s.commune_insee}"
+                    fc = _fetch_gpu_zone_urba(partition)
+                    zone = _pick_plu_zone_for_point(lon, lat, fc)
+                    if zone:
+                        p = zone.get("properties") or {}
+                        s.plu_typezone = p.get("typezone")
+                        s.plu_libelle = p.get("libelle")
+                        s.plu_idurba = p.get("idurba")
+
+                # 3) Cadastre
+                cad = _fetch_cadastre_for_point(lon, lat)
+                s.cad_section = cad.get("section")
+                s.cad_numero = cad.get("numero")
+                try:
+                    s.cad_contenance = int(cad.get("contenance")) if cad.get("contenance") is not None else None
+                except Exception:
+                    s.cad_contenance = None
+                s.cad_code_insee = cad.get("code_insee")
+
+                from datetime import datetime, timezone
+                s.enriched_at = datetime.now(timezone.utc)
+                s.enrich_status = "ok"
+                db.session.commit()
+
+        except Exception as e:
+            try:
+                with app.app_context():
+                    s = PropertySubmission.query.get(submission_id)
+                    if s:
+                        s.enrich_status = "error"
+                        s.enrich_error = str(e)
+                        db.session.commit()
+            except Exception:
+                pass
+        finally:
+            _enrich_lock.release()
+
+    threading.Thread(target=job, daemon=True).start()
+
+
+def run_enrich_batch(limit: int = 1) -> int:
+    if not ENRICH_ENABLED:
+        return 0
+    with app.app_context():
+        ensure_tables()
+        q = (
+            PropertySubmission.query
+            .filter((PropertySubmission.enrich_status.is_(None)) | (PropertySubmission.enrich_status == "queued") | (PropertySubmission.enrich_status == "error"))
+            .filter(PropertySubmission.adresse_x.isnot(None))
+            .filter(PropertySubmission.adresse_y.isnot(None))
+            .order_by(PropertySubmission.id.asc())
+            .limit(limit)
+        )
+        rows = q.all()
+        for s in rows:
+            if s.enrich_status != "running":
+                s.enrich_status = "queued"
+                db.session.commit()
+                enrich_submission_async(s.id)
+        return len(rows)
 
 
 @app.get("/")
@@ -134,6 +346,7 @@ def submit_questionnaire():
         adresse_source=form["adresse_source"] or None,
         prix=_to_int(form["prix"]),
         description=form["description"] or None,
+        enrich_status="queued" if ENRICH_ENABLED else "skipped",
     )
 
     # If DB was reset and tables are missing, create and retry once.
@@ -150,6 +363,10 @@ def submit_questionnaire():
         else:
             raise
 
+    # Async enrichment (do not block the user)
+    if ENRICH_ENABLED:
+        enrich_submission_async(submission.id)
+
     return redirect(url_for("thanks"))
 
 
@@ -162,6 +379,10 @@ def thanks():
 @admin_required
 def admin_list():
     ensure_tables()
+    # kick a small enrichment batch in the background
+    if ENRICH_ENABLED and ENRICH_BATCH_ON_ADMIN > 0:
+        run_enrich_batch(ENRICH_BATCH_ON_ADMIN)
+
     submissions = PropertySubmission.query.order_by(PropertySubmission.id.desc()).all()
     return render_template("admin_list.html", submissions=submissions)
 
@@ -170,6 +391,8 @@ def admin_list():
 @admin_required
 def admin_map():
     ensure_tables()
+    if ENRICH_ENABLED and ENRICH_BATCH_ON_ADMIN > 0:
+        run_enrich_batch(ENRICH_BATCH_ON_ADMIN)
     rows = (
         PropertySubmission.query
         .filter(PropertySubmission.adresse_x.isnot(None))
@@ -435,6 +658,20 @@ def admin_api_cadastre_parcelle():
         }), 504
 
     return jsonify({"mode": "commune", "insee": insee, "data": fc})
+
+
+@app.post("/admin/enrich/<int:submission_id>")
+@admin_required
+def admin_enrich_one(submission_id: int):
+    ensure_tables()
+    s = PropertySubmission.query.get(submission_id)
+    if not s:
+        abort(404)
+    s.enrich_status = "queued"
+    s.enrich_error = None
+    db.session.commit()
+    enrich_submission_async(s.id)
+    return redirect(url_for("admin_list"))
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
