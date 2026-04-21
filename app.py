@@ -164,8 +164,29 @@ def _fetch_plu_zone_for_point(lon: float, lat: float) -> dict | None:
     return feats[0] if feats else None
 
 
+def _fetch_cadastre_parcelle_for_point(lon: float, lat: float) -> dict:
+    """Fetch cadastre parcel containing the point.
+
+    Note: for parcelle, APIcarto is reliable with lon/lat params.
+    (geom=Point seems to return empty for parcelle in some cases.)
+    """
+    url = "https://apicarto.ign.fr/api/cadastre/parcelle"
+    r = requests.get(url, params={"lon": lon, "lat": lat}, timeout=25)
+    r.raise_for_status()
+    fc = r.json() or {}
+    feat = (fc.get("features") or [None])[0] or {}
+    props = feat.get("properties") or {}
+    return {
+        "section": props.get("section"),
+        "numero": props.get("numero"),
+        "contenance": props.get("contenance"),
+        "code_insee": props.get("code_insee"),
+        "idu": props.get("idu"),
+    }
+
+
 def _fetch_cadastre_feuille_for_point(lon: float, lat: float) -> dict:
-    """Fetch cadastre sheet (feuille) containing the point."""
+    """Optional: fetch cadastre sheet (feuille) containing the point."""
     url = "https://apicarto.ign.fr/api/cadastre/feuille"
     geom = {"type": "Point", "coordinates": [lon, lat]}
     r = requests.get(url, params={"geom": json.dumps(geom, separators=(",", ":"))}, timeout=25)
@@ -220,14 +241,25 @@ def enrich_submission_async(submission_id: int) -> None:
                     s.plu_libelle = p.get("libelle")
                     s.plu_idurba = p.get("idurba")
 
-                # 3) Cadastre feuille via geom=Point
-                cad = _fetch_cadastre_feuille_for_point(lon, lat)
-                s.cad_section = cad.get("section")
-                s.cad_feuille = cad.get("feuille")
-                s.cad_code_insee = cad.get("code_insee")
-                # parcelle fields not provided by feuille
-                s.cad_numero = None
-                s.cad_contenance = None
+                # 3) Cadastre parcelle (section/numero/contenance)
+                cadp = _fetch_cadastre_parcelle_for_point(lon, lat)
+                s.cad_section = cadp.get("section")
+                s.cad_numero = cadp.get("numero")
+                try:
+                    s.cad_contenance = int(cadp.get("contenance")) if cadp.get("contenance") is not None else None
+                except Exception:
+                    s.cad_contenance = None
+                s.cad_code_insee = cadp.get("code_insee")
+
+                # Optional: cadastre feuille (useful for display)
+                try:
+                    cadf = _fetch_cadastre_feuille_for_point(lon, lat)
+                    s.cad_feuille = cadf.get("feuille")
+                    # if section missing, fill it
+                    if not s.cad_section:
+                        s.cad_section = cadf.get("section")
+                except Exception:
+                    pass
 
                 from datetime import datetime, timezone
                 s.enriched_at = datetime.now(timezone.utc)
