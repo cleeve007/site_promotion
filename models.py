@@ -47,8 +47,9 @@ class PropertySubmission(db.Model):
     plu_libelle = db.Column(db.String(80), nullable=True)
     plu_idurba = db.Column(db.String(80), nullable=True)
 
-    # Cadastre parcelle (par point)
+    # Cadastre (feuille/parcelle)
     cad_section = db.Column(db.String(10), nullable=True)
+    cad_feuille = db.Column(db.String(20), nullable=True)
     cad_numero = db.Column(db.String(20), nullable=True)
-    cad_contenance = db.Column(db.Integer, nullable=True)  # m²
+    cad_contenance = db.Column(db.Integer, nullable=True)  # m² (only if parcelle)
     cad_code_insee = db.Column(db.String(10), nullable=True)

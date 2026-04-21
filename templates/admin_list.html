@@ -71,8 +71,9 @@
                 <div class="muted"><code>{{ s.plu_idurba or '' }}</code></div>
               </td>
               <td class="muted">
-                <div>{{ s.cad_section or '' }} {{ s.cad_numero or '' }}</div>
-                <div class="muted">Contenance: {{ s.cad_contenance or '' }} m²</div>
+                <div>Section: <code>{{ s.cad_section or '' }}</code> Feuille: <code>{{ s.cad_feuille or '' }}</code></div>
+                {% if s.cad_numero %}<div>Parcelle: <code>{{ s.cad_numero }}</code></div>{% endif %}
+                {% if s.cad_contenance %}<div class="muted">Contenance: {{ s.cad_contenance }} m²</div>{% endif %}
               </td>
               <td class="muted">
                 <div>Status: <code>{{ s.enrich_status or '' }}</code></div>

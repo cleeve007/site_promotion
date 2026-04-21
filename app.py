@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import json
 
 import requests
 
@@ -148,43 +149,35 @@ def _fetch_commune_for_point(lon: float, lat: float) -> dict:
     }
 
 
-_gpu_cache = {}  # insee -> (ts, featurecollection)
+def _fetch_plu_zone_for_point(lon: float, lat: float) -> dict | None:
+    """Fetch the PLU/GPU zone containing the point.
 
-
-def _fetch_gpu_zone_urba(partition: str, ttl_sec: int = 300) -> dict:
-    now = time.time()
-    cached = _gpu_cache.get(partition)
-    if cached and (now - cached[0] < ttl_sec):
-        return cached[1]
-
+    APIcarto supports filtering by geometry directly:
+    /api/gpu/zone-urba?geom={"type":"Point","coordinates":[lon,lat]}
+    """
     url = "https://apicarto.ign.fr/api/gpu/zone-urba"
-    r = requests.get(url, params={"partition": partition}, timeout=40)
+    geom = {"type": "Point", "coordinates": [lon, lat]}
+    r = requests.get(url, params={"geom": json.dumps(geom, separators=(",", ":"))}, timeout=35)
     r.raise_for_status()
-    fc = r.json()
-    _gpu_cache[partition] = (now, fc)
-    return fc
+    fc = r.json() or {}
+    feats = fc.get("features") or []
+    return feats[0] if feats else None
 
 
-def _pick_plu_zone_for_point(lon: float, lat: float, fc: dict) -> dict | None:
-    for f in fc.get("features") or []:
-        geom = f.get("geometry")
-        if _point_in_geometry(lon, lat, geom):
-            return f
-    return None
-
-
-def _fetch_cadastre_for_point(lon: float, lat: float) -> dict:
-    url = "https://apicarto.ign.fr/api/cadastre/parcelle"
-    r = requests.get(url, params={"lon": lon, "lat": lat}, timeout=25)
+def _fetch_cadastre_feuille_for_point(lon: float, lat: float) -> dict:
+    """Fetch cadastre sheet (feuille) containing the point."""
+    url = "https://apicarto.ign.fr/api/cadastre/feuille"
+    geom = {"type": "Point", "coordinates": [lon, lat]}
+    r = requests.get(url, params={"geom": json.dumps(geom, separators=(",", ":"))}, timeout=25)
     r.raise_for_status()
     fc = r.json() or {}
     feat = (fc.get("features") or [None])[0] or {}
     props = feat.get("properties") or {}
     return {
         "section": props.get("section"),
-        "numero": props.get("numero"),
-        "contenance": props.get("contenance"),
+        "feuille": props.get("feuille"),
         "code_insee": props.get("code_insee"),
+        "id": feat.get("id"),
     }
 
 
@@ -219,26 +212,22 @@ def enrich_submission_async(submission_id: int) -> None:
                 s.commune_insee = com.get("insee")
                 s.commune_nom = com.get("nom")
 
-                # 2) PLU (GPU zone-urba)
-                if s.commune_insee:
-                    partition = f"DU_{s.commune_insee}"
-                    fc = _fetch_gpu_zone_urba(partition)
-                    zone = _pick_plu_zone_for_point(lon, lat, fc)
-                    if zone:
-                        p = zone.get("properties") or {}
-                        s.plu_typezone = p.get("typezone")
-                        s.plu_libelle = p.get("libelle")
-                        s.plu_idurba = p.get("idurba")
+                # 2) PLU (GPU zone-urba) via geom=Point
+                zone = _fetch_plu_zone_for_point(lon, lat)
+                if zone:
+                    p = zone.get("properties") or {}
+                    s.plu_typezone = p.get("typezone")
+                    s.plu_libelle = p.get("libelle")
+                    s.plu_idurba = p.get("idurba")
 
-                # 3) Cadastre
-                cad = _fetch_cadastre_for_point(lon, lat)
+                # 3) Cadastre feuille via geom=Point
+                cad = _fetch_cadastre_feuille_for_point(lon, lat)
                 s.cad_section = cad.get("section")
-                s.cad_numero = cad.get("numero")
-                try:
-                    s.cad_contenance = int(cad.get("contenance")) if cad.get("contenance") is not None else None
-                except Exception:
-                    s.cad_contenance = None
+                s.cad_feuille = cad.get("feuille")
                 s.cad_code_insee = cad.get("code_insee")
+                # parcelle fields not provided by feuille
+                s.cad_numero = None
+                s.cad_contenance = None
 
                 from datetime import datetime, timezone
                 s.enriched_at = datetime.now(timezone.utc)
